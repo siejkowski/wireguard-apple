@@ -12,9 +12,12 @@ class TunnelListCell: UITableViewCell {
                 self?.nameLabel.text = tunnel.name
             }
             // Bind to the tunnel's status
-            update(from: tunnel?.status, animated: false)
+            update(from: tunnel, animated: false)
             statusObservationToken = tunnel?.observe(\.status) { [weak self] tunnel, _ in
-                self?.update(from: tunnel.status, animated: true)
+                self?.update(from: tunnel, animated: true)
+            }
+            effectiveActivateOnDemandToken = tunnel?.observe(\.effectiveActivateOnDemandEnabled) { [weak self] tunnel, _ in
+                self?.update(from: tunnel, animated: true)
             }
         }
     }
@@ -94,13 +97,25 @@ class TunnelListCell: UITableViewCell {
         onSwitchToggled?(statusSwitch.isOn)
     }
 
-    private func update(from status: TunnelStatus?, animated: Bool) {
-        guard let status = status else {
+    private func update(from tunnel: TunnelContainer?, animated: Bool) {
+        guard let tunnel = tunnel else {
             reset(animated: animated)
             return
         }
-        statusSwitch.setOn(!(status == .deactivating || status == .inactive), animated: animated)
+
+        let status = tunnel.status
+
+        statusSwitch.setOn(!(status == .deactivating || status == .inactive) || (status == .inactive && tunnel.effectiveActivateOnDemandEnabled), animated: animated)
         statusSwitch.isUserInteractionEnabled = (status == .inactive || status == .active)
+
+        if case .inactive = status, tunnel.effectiveActivateOnDemandEnabled {
+            statusSwitch.tintColor = UIColor.systemOrange
+            statusSwitch.onTintColor = UIColor.systemOrange
+        } else {
+            statusSwitch.tintColor = nil
+            statusSwitch.onTintColor = nil
+        }
+
         if status == .inactive || status == .active {
             busyIndicator.stopAnimating()
         } else {
@@ -109,6 +124,7 @@ class TunnelListCell: UITableViewCell {
     }
 
     private func reset(animated: Bool) {
+        statusSwitch.thumbTintColor = nil
         statusSwitch.setOn(false, animated: animated)
         statusSwitch.isUserInteractionEnabled = false
         busyIndicator.stopAnimating()
