@@ -31,6 +31,18 @@ class TunnelListCell: UITableViewCell {
         return nameLabel
     }()
 
+    let subTitleLabel: UILabel = {
+        let subTitleLabel = UILabel()
+        subTitleLabel.font = UIFont.preferredFont(forTextStyle: .subheadline)
+        if #available(iOS 13.0, *) {
+            subTitleLabel.textColor = .secondaryLabel
+        } else {
+            subTitleLabel.textColor = .systemGray
+        }
+        subTitleLabel.adjustsFontForContentSizeCategory = true
+        return subTitleLabel
+    }()
+
     let busyIndicator: UIActivityIndicatorView = {
         let busyIndicator: UIActivityIndicatorView
         if #available(iOS 13.0, *) {
@@ -46,13 +58,17 @@ class TunnelListCell: UITableViewCell {
 
     private var statusObservationToken: NSKeyValueObservation?
     private var nameObservationToken: NSKeyValueObservation?
+    private var effectiveActivateOnDemandToken: NSKeyValueObservation?
+
+    private var subTitleLabelBottomConstraint: NSLayoutConstraint?
+    private var nameLabelBottomConstraint: NSLayoutConstraint?
 
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
 
         accessoryType = .disclosureIndicator
 
-        for subview in [statusSwitch, busyIndicator, nameLabel] {
+        for subview in [statusSwitch, busyIndicator, nameLabel, subTitleLabel] {
             subview.translatesAutoresizingMaskIntoConstraints = false
             contentView.addSubview(subview)
         }
@@ -62,6 +78,11 @@ class TunnelListCell: UITableViewCell {
         let nameLabelBottomConstraint =
             contentView.layoutMarginsGuide.bottomAnchor.constraint(equalToSystemSpacingBelow: nameLabel.bottomAnchor, multiplier: 1)
         nameLabelBottomConstraint.priority = .defaultLow
+        self.nameLabelBottomConstraint = nameLabelBottomConstraint
+
+        subTitleLabelBottomConstraint =
+            contentView.layoutMarginsGuide.bottomAnchor.constraint(equalToSystemSpacingBelow: subTitleLabel.bottomAnchor, multiplier: 1)
+        subTitleLabelBottomConstraint?.priority = .defaultLow
 
         NSLayoutConstraint.activate([
             statusSwitch.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
@@ -69,8 +90,13 @@ class TunnelListCell: UITableViewCell {
             statusSwitch.leadingAnchor.constraint(equalToSystemSpacingAfter: busyIndicator.trailingAnchor, multiplier: 1),
 
             nameLabel.topAnchor.constraint(equalToSystemSpacingBelow: contentView.layoutMarginsGuide.topAnchor, multiplier: 1),
-            nameLabelBottomConstraint,
             nameLabel.leadingAnchor.constraint(equalToSystemSpacingAfter: contentView.layoutMarginsGuide.leadingAnchor, multiplier: 1),
+            nameLabel.trailingAnchor.constraint(lessThanOrEqualTo: statusSwitch.leadingAnchor),
+            nameLabelBottomConstraint,
+
+            subTitleLabel.topAnchor.constraint(equalToSystemSpacingBelow: nameLabel.bottomAnchor, multiplier: 0.25),
+            subTitleLabel.leadingAnchor.constraint(equalToSystemSpacingAfter: contentView.layoutMarginsGuide.leadingAnchor, multiplier: 1),
+            subTitleLabel.trailingAnchor.constraint(lessThanOrEqualTo: statusSwitch.leadingAnchor),
 
             busyIndicator.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
             busyIndicator.leadingAnchor.constraint(equalToSystemSpacingAfter: nameLabel.trailingAnchor, multiplier: 1)
@@ -97,6 +123,20 @@ class TunnelListCell: UITableViewCell {
         onSwitchToggled?(statusSwitch.isOn)
     }
 
+    private func setSubTitleText(_ string: String?) {
+        if let string = string {
+            subTitleLabel.text = string
+            subTitleLabel.isHidden = false
+            nameLabelBottomConstraint?.isActive = false
+            subTitleLabelBottomConstraint?.isActive = true
+        } else {
+            subTitleLabel.text = nil
+            subTitleLabel.isHidden = true
+            subTitleLabelBottomConstraint?.isActive = false
+            nameLabelBottomConstraint?.isActive = true
+        }
+    }
+
     private func update(from tunnel: TunnelContainer?, animated: Bool) {
         guard let tunnel = tunnel else {
             reset(animated: animated)
@@ -104,6 +144,12 @@ class TunnelListCell: UITableViewCell {
         }
 
         let status = tunnel.status
+
+        if tunnel.effectiveActivateOnDemandEnabled {
+            setSubTitleText(tr("tunnelsListOnDemandActiveCellSubTitle"))
+        } else {
+            setSubTitleText(nil)
+        }
 
         statusSwitch.setOn(!(status == .deactivating || status == .inactive) || (status == .inactive && tunnel.effectiveActivateOnDemandEnabled), animated: animated)
         statusSwitch.isUserInteractionEnabled = (status == .inactive || status == .active)
@@ -124,6 +170,7 @@ class TunnelListCell: UITableViewCell {
     }
 
     private func reset(animated: Bool) {
+        setSubTitleText(nil)
         statusSwitch.thumbTintColor = nil
         statusSwitch.setOn(false, animated: animated)
         statusSwitch.isUserInteractionEnabled = false
