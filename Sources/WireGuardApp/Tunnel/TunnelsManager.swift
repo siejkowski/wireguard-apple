@@ -132,6 +132,7 @@ class TunnelsManager {
         let tunnelProviderManager = NETunnelProviderManager()
         tunnelProviderManager.setTunnelConfiguration(tunnelConfiguration)
         tunnelProviderManager.isEnabled = true
+        tunnelProviderManager.isOnDemandEnabled = onDemandOption != .off
         tunnelProviderManager.onDemandRules = onDemandOption.onDemandRules
 
         let activeTunnel = tunnels.first { $0.status == .active || $0.status == .activating }
@@ -229,6 +230,7 @@ class TunnelsManager {
             isTunnelConfigurationChanged = true
         }
         tunnelProviderManager.isEnabled = true
+        tunnelProviderManager.isOnDemandEnabled = onDemandOption != .off
         tunnelProviderManager.onDemandRules = onDemandOption.onDemandRules
 
         tunnelProviderManager.saveToPreferences { [weak self] error in
@@ -248,6 +250,7 @@ class TunnelsManager {
                 RecentTunnelsTracker.handleTunnelRenamed(oldName: oldName, newName: tunnelName)
                 #endif
             }
+            tunnel.tunnelManagerDidChangeTunnelProvider()
             self.tunnelsListDelegate?.tunnelModified(at: self.tunnels.firstIndex(of: tunnel)!)
 
             if isTunnelConfigurationChanged {
@@ -261,7 +264,7 @@ class TunnelsManager {
             // Reload tunnel after saving.
             // Without this, the tunnel stopes getting updates on the tunnel status from iOS.
             tunnelProviderManager.loadFromPreferences { error in
-                tunnel.isActivateOnDemandEnabled = tunnelProviderManager.isOnDemandEnabled
+                tunnel.tunnelManagerDidChangeTunnelProvider()
                 if let error = error {
                     wg_log(.error, message: "Modify: Re-loading after saving configuration failed: \(error)")
                     completionHandler(TunnelsManagerError.systemErrorOnModifyTunnel(systemError: error))
@@ -401,7 +404,8 @@ class TunnelsManager {
 
     func startDeactivation(of tunnel: TunnelContainer) {
         tunnel.isAttemptingActivation = false
-        guard tunnel.status != .inactive && tunnel.status != .deactivating else { return }
+        guard (tunnel.status != .inactive && tunnel.status != .deactivating) ||
+                tunnel.effectiveActivateOnDemandEnabled else { return }
         #if targetEnvironment(simulator)
         tunnel.status = .inactive
         #else
@@ -491,7 +495,10 @@ class TunnelContainer: NSObject {
     @objc dynamic var name: String
     @objc dynamic var status: TunnelStatus
 
-    @objc dynamic var isActivateOnDemandEnabled: Bool
+    @objc dynamic var isActivateOnDemandEnabled = false
+
+    /// Tells whether the operating system evaluates the on-demand rules set for this tunnel
+    @objc dynamic var effectiveActivateOnDemandEnabled = false
 
     var isAttemptingActivation = false {
         didSet {
@@ -518,7 +525,11 @@ class TunnelContainer: NSObject {
     var activationTimer: Timer?
     var deactivationTimer: Timer?
 
-    fileprivate var tunnelProvider: NETunnelProviderManager
+    @objc fileprivate var tunnelProvider: NETunnelProviderManager {
+        didSet {
+            updateTunnelProviderDependentProperties()
+        }
+    }
 
     var tunnelConfiguration: TunnelConfiguration? {
         return tunnelProvider.tunnelConfiguration
@@ -538,9 +549,9 @@ class TunnelContainer: NSObject {
         name = tunnel.localizedDescription ?? "Unnamed"
         let status = TunnelStatus(from: tunnel.connection.status)
         self.status = status
-        isActivateOnDemandEnabled = tunnel.isOnDemandEnabled
         tunnelProvider = tunnel
         super.init()
+        updateTunnelProviderDependentProperties()
     }
 
     func getRuntimeTunnelConfiguration(completionHandler: @escaping ((TunnelConfiguration?) -> Void)) {
@@ -565,7 +576,6 @@ class TunnelContainer: NSObject {
             return
         }
         status = TunnelStatus(from: tunnelProvider.connection.status)
-        isActivateOnDemandEnabled = tunnelProvider.isOnDemandEnabled
     }
 
     fileprivate func startActivation(recursionCount: UInt = 0, lastError: Error? = nil, activationDelegate: TunnelsManagerActivationDelegate?) {
@@ -624,6 +634,7 @@ class TunnelContainer: NSObject {
             wg_log(.debug, staticMessage: "startActivation: Will reload tunnel and then try to start it.")
             tunnelProvider.loadFromPreferences { [weak self] error in
                 guard let self = self else { return }
+                self.updateTunnelProviderDependentProperties()
                 if error != nil {
                     wg_log(.error, message: "startActivation: Error reloading tunnel: \(error!)")
                     self.status = .inactive
@@ -651,6 +662,15 @@ class TunnelContainer: NSObject {
         } else {
             (self.tunnelProvider.connection as? NETunnelProviderSession)?.stopTunnel()
         }
+    }
+
+    private func updateTunnelProviderDependentProperties() {
+        isActivateOnDemandEnabled = tunnelProvider.isOnDemandEnabled
+        effectiveActivateOnDemandEnabled = tunnelProvider.isEnabled && tunnelProvider.isOnDemandEnabled
+    }
+
+    fileprivate func tunnelManagerDidChangeTunnelProvider() {
+        updateTunnelProviderDependentProperties()
     }
 }
 
