@@ -378,20 +378,28 @@ extension TunnelsListTableViewController: UITableViewDelegate {
 
 extension TunnelsListTableViewController: TunnelsManagerListDelegate {
     func tunnelAdded(at index: Int) {
+        tableView.beginUpdates()
         tableView.insertRows(at: [IndexPath(row: index, section: 0)], with: .automatic)
         centeredAddButton.isHidden = (tunnelsManager?.numberOfTunnels() ?? 0 > 0)
+        tableView.endUpdates()
     }
 
     func tunnelModified(at index: Int) {
+        tableView.beginUpdates()
         tableView.reloadRows(at: [IndexPath(row: index, section: 0)], with: .automatic)
+        tableView.endUpdates()
     }
 
     func tunnelMoved(from oldIndex: Int, to newIndex: Int) {
+        tableView.beginUpdates()
         tableView.moveRow(at: IndexPath(row: oldIndex, section: 0), to: IndexPath(row: newIndex, section: 0))
+        tableView.endUpdates()
     }
 
     func tunnelRemoved(at index: Int, tunnel: TunnelContainer) {
+        tableView.beginUpdates()
         tableView.deleteRows(at: [IndexPath(row: index, section: 0)], with: .automatic)
+        tableView.endUpdates()
         centeredAddButton.isHidden = tunnelsManager?.numberOfTunnels() ?? 0 > 0
         if detailDisplayedTunnel == tunnel, let splitViewController = splitViewController {
             if splitViewController.isCollapsed != false {

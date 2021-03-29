@@ -135,6 +135,7 @@ class TunnelListCell: UITableViewCell {
             subTitleLabelBottomConstraint?.isActive = false
             nameLabelBottomConstraint?.isActive = true
         }
+        contentView.layoutIfNeeded()
     }
 
     private func update(from tunnel: TunnelContainer?, animated: Bool) {

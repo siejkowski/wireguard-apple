@@ -394,7 +394,11 @@ class TunnelsManager {
         #if targetEnvironment(simulator)
         tunnel.status = .active
         #else
-        tunnel.startActivation(activationDelegate: activationDelegate)
+        tunnel.startActivation(didSaveToPreferencesCompletion: { [weak self] in
+            guard let self = self else { return }
+
+            self.tunnelsListDelegate?.tunnelModified(at: self.tunnels.firstIndex(of: tunnel)!)
+        }, activationDelegate: activationDelegate)
         #endif
 
         #if os(iOS)
@@ -409,7 +413,12 @@ class TunnelsManager {
         #if targetEnvironment(simulator)
         tunnel.status = .inactive
         #else
-        tunnel.startDeactivation()
+        tunnel.startDeactivation { [weak self] error in
+            guard let self = self else { return }
+            if error == nil {
+                self.tunnelsListDelegate?.tunnelModified(at: self.tunnels.firstIndex(of: tunnel)!)
+            }
+        }
         #endif
     }
 
@@ -578,7 +587,7 @@ class TunnelContainer: NSObject {
         status = TunnelStatus(from: tunnelProvider.connection.status)
     }
 
-    fileprivate func startActivation(recursionCount: UInt = 0, lastError: Error? = nil, activationDelegate: TunnelsManagerActivationDelegate?) {
+    fileprivate func startActivation(recursionCount: UInt = 0, lastError: Error? = nil, didSaveToPreferencesCompletion: @escaping () -> Void, activationDelegate: TunnelsManagerActivationDelegate?) {
         if recursionCount >= 8 {
             wg_log(.error, message: "startActivation: Failed after 8 attempts. Giving up with \(lastError!)")
             activationDelegate?.tunnelActivationAttemptFailed(tunnel: self, error: .failedBecauseOfTooManyErrors(lastSystemError: lastError!))
@@ -597,13 +606,14 @@ class TunnelContainer: NSObject {
             tunnelProvider.isOnDemandEnabled = onDemandOption != .off
             tunnelProvider.saveToPreferences { [weak self] error in
                 guard let self = self else { return }
-                if error != nil {
-                    wg_log(.error, message: "Error saving tunnel after re-enabling: \(error!)")
-                    activationDelegate?.tunnelActivationAttemptFailed(tunnel: self, error: .failedWhileSaving(systemError: error!))
+                if let error = error {
+                    wg_log(.error, message: "Error saving tunnel after re-enabling: \(error)")
+                    activationDelegate?.tunnelActivationAttemptFailed(tunnel: self, error: .failedWhileSaving(systemError: error))
                     return
                 }
+                didSaveToPreferencesCompletion()
                 wg_log(.debug, staticMessage: "startActivation: Tunnel saved after re-enabling, invoking startActivation")
-                self.startActivation(recursionCount: recursionCount + 1, lastError: NEVPNError(NEVPNError.configurationUnknown), activationDelegate: activationDelegate)
+                self.startActivation(recursionCount: recursionCount + 1, lastError: NEVPNError(NEVPNError.configurationUnknown), didSaveToPreferencesCompletion: didSaveToPreferencesCompletion, activationDelegate: activationDelegate)
             }
             return
         }
@@ -642,12 +652,12 @@ class TunnelContainer: NSObject {
                     return
                 }
                 wg_log(.debug, staticMessage: "startActivation: Tunnel reloaded, invoking startActivation")
-                self.startActivation(recursionCount: recursionCount + 1, lastError: systemError, activationDelegate: activationDelegate)
+                self.startActivation(recursionCount: recursionCount + 1, lastError: systemError, didSaveToPreferencesCompletion: didSaveToPreferencesCompletion, activationDelegate: activationDelegate)
             }
         }
     }
 
-    fileprivate func startDeactivation() {
+    fileprivate func startDeactivation(completionHandler: @escaping (Error?) -> Void) {
         wg_log(.debug, message: "startDeactivation: Tunnel: \(name)")
 
         if tunnelProvider.isOnDemandEnabled {
@@ -657,10 +667,13 @@ class TunnelContainer: NSObject {
                     wg_log(.error, message: "startDeactivation: Error disabling on-demand: \(error.localizedDescription)")
                 }
 
+                self?.updateTunnelProviderDependentProperties()
                 (self?.tunnelProvider.connection as? NETunnelProviderSession)?.stopTunnel()
+                completionHandler(error)
             }
         } else {
             (self.tunnelProvider.connection as? NETunnelProviderSession)?.stopTunnel()
+            completionHandler(nil)
         }
     }
 
